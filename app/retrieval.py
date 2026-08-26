@@ -4,6 +4,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 
 from app.ingest import Chunk, load_documents
 
+
 def authority_weight(metadata: dict) -> float:
     status = metadata.get("status", "")
     authority = metadata.get("policy_authority", "")
@@ -15,6 +16,7 @@ def authority_weight(metadata: dict) -> float:
     if status == "active" and authority == "official":
         return 1.0
     return 0.5
+
 
 class Retriever:
     def __init__(self, chunks: list[Chunk]):
@@ -51,6 +53,23 @@ class Retriever:
         scored.sort(key=lambda x: x[1], reverse=True)
         return scored[:top_k]
 
+    def detect_conflict(self, results: list[tuple[Chunk, float]]) -> bool:
+        trusted = [
+            (c, s) for c, s in results
+            if c.metadata.get("status") == "active"
+            and c.metadata.get("policy_authority") == "official"
+        ]
+        doc_ids = {c.doc_id for c, s in trusted}
+        if len(doc_ids) < 2:
+            return False
+
+        top_score = trusted[0][1] if trusted else 0
+        close_alternatives = [
+            c for c, s in trusted
+            if c.doc_id != trusted[0][0].doc_id and s >= top_score * 0.6
+        ]
+        return len(close_alternatives) > 0
+
 
 if __name__ == "__main__":
     chunks = load_documents("knowledge-base")
@@ -68,3 +87,11 @@ if __name__ == "__main__":
         results = retriever.search(q, top_k=3)
         for chunk, score in results:
             print(f"  [{score:.3f}] {chunk.citation} (status={chunk.metadata.get('status')})")
+
+    print("\n--- Conflict detection test ---")
+    conflict_query = "Can I put the entire Breeze Tumbler in the dishwasher?"
+    results = retriever.search(conflict_query, top_k=5)
+    print(f"Query: {conflict_query}")
+    for chunk, score in results:
+        print(f"  [{score:.3f}] {chunk.citation}")
+    print(f"Conflict detected: {retriever.detect_conflict(results)}")
