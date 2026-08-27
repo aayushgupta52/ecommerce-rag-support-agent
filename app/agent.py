@@ -3,6 +3,7 @@ from dotenv import load_dotenv
 from google import genai
 from google.genai import types
 from google.genai import errors as genai_errors
+from app.logger import log_interaction
 
 from app.ingest import load_documents
 from app.retrieval import Retriever
@@ -104,6 +105,11 @@ class Agent:
             for m in history
         ]
 
+        retrieved_log = []
+        tool_call_log = []
+        handoff = False
+        error_log = None
+
         max_tool_rounds = 4
         response = None
         try:
@@ -127,10 +133,21 @@ class Agent:
 
                 if fn_name == "search_knowledge_base":
                     tool_result = self._execute_search_kb(fn_args.get("query", ""))
+                    retrieved_log.append({
+                        "query": fn_args.get("query", ""),
+                        "sources": [e["source"] for e in tool_result.get("excerpts", [])],
+                        "possible_conflict": tool_result.get("possible_conflict", False),
+                    })
+                    if tool_result.get("possible_conflict"):
+                        handoff = True
                 elif fn_name == "lookup_order":
                     tool_result = self._execute_lookup_order(fn_args.get("order_id", ""))
+                    if tool_result.get("order", {}).get("status") == "exception":
+                        handoff = True
                 else:
                     tool_result = {"error": f"Unknown tool: {fn_name}"}
+
+                tool_call_log.append({"tool": fn_name, "args": fn_args, "found": tool_result.get("found")})
 
                 contents.append(response.candidates[0].content)
                 contents.append(
@@ -141,13 +158,24 @@ class Agent:
                 )
         except genai_errors.ClientError as e:
             if "RESOURCE_EXHAUSTED" in str(e) or "429" in str(e):
-                return "I'm receiving a high volume of requests right now and hit a rate limit. Please try again in a moment."
-            return "I ran into an error processing your request. Please try again or contact support."
+                error_log = "rate_limited"
+                reply = "I'm receiving a high volume of requests right now and hit a rate limit. Please try again in a moment."
+                log_interaction(session_id, user_message, retrieved_log, tool_call_log, reply, handoff, error_log)
+                return reply
+            error_log = str(e)
+            reply = "I ran into an error processing your request. Please try again or contact support."
+            log_interaction(session_id, user_message, retrieved_log, tool_call_log, reply, handoff, error_log)
+            return reply
         except genai_errors.ServerError:
-            return "Our AI service is temporarily unavailable. Please try again in a moment."
+            error_log = "server_unavailable"
+            reply = "Our AI service is temporarily unavailable. Please try again in a moment."
+            log_interaction(session_id, user_message, retrieved_log, tool_call_log, reply, handoff, error_log)
+            return reply
 
         final_text = response.text if response and response.text else "(no response generated)"
         self.sessions.add_message(session_id, "assistant", final_text)
+
+        log_interaction(session_id, user_message, retrieved_log, tool_call_log, final_text, handoff, error_log)
         return final_text
 
 
