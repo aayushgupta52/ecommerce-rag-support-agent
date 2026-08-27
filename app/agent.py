@@ -96,7 +96,7 @@ class Agent:
             "internal_guidance_for_agent": guidance,
         }
 
-    def handle_message(self, session_id: str, user_message: str) -> str:
+    def handle_message_detailed(self, session_id: str, user_message: str) -> dict:
         self.sessions.add_message(session_id, "user", user_message)
         history = self.sessions.get_history(session_id)
 
@@ -161,22 +161,26 @@ class Agent:
                 error_log = "rate_limited"
                 reply = "I'm receiving a high volume of requests right now and hit a rate limit. Please try again in a moment."
                 log_interaction(session_id, user_message, retrieved_log, tool_call_log, reply, handoff, error_log)
-                return reply
+                return {"text": reply, "tool_calls": tool_call_log, "handoff": handoff, "error": error_log}
             error_log = str(e)
             reply = "I ran into an error processing your request. Please try again or contact support."
             log_interaction(session_id, user_message, retrieved_log, tool_call_log, reply, handoff, error_log)
-            return reply
+            return {"text": reply, "tool_calls": tool_call_log, "handoff": handoff, "error": error_log}
         except genai_errors.ServerError:
             error_log = "server_unavailable"
             reply = "Our AI service is temporarily unavailable. Please try again in a moment."
             log_interaction(session_id, user_message, retrieved_log, tool_call_log, reply, handoff, error_log)
-            return reply
+            return {"text": reply, "tool_calls": tool_call_log, "handoff": handoff, "error": error_log}
 
         final_text = response.text if response and response.text else "(no response generated)"
         self.sessions.add_message(session_id, "assistant", final_text)
 
         log_interaction(session_id, user_message, retrieved_log, tool_call_log, final_text, handoff, error_log)
-        return final_text
+        return {"text": final_text, "tool_calls": tool_call_log, "handoff": handoff, "error": error_log}
+
+    def handle_message(self, session_id: str, user_message: str) -> str:
+        result = self.handle_message_detailed(session_id, user_message)
+        return result["text"]
 
 
 if __name__ == "__main__":
