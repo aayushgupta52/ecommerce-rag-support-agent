@@ -1,6 +1,7 @@
 import json
 import sys
 import uuid
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -12,6 +13,7 @@ def load_cases(path: str = "evaluation/visible-cases.json") -> list[dict]:
     with open(path, "r", encoding="utf-8") as f:
         data = json.load(f)
     return data["cases"]
+
 
 def check_expectations(response_text: str, expect: dict) -> list[str]:
     failures = []
@@ -34,6 +36,7 @@ def check_expectations(response_text: str, expect: dict) -> list[str]:
             failures.append(f"Cited forbidden/unauthoritative source: '{source}'")
 
     return failures
+
 
 def run_case(agent: Agent, case: dict) -> dict:
     session_id = f"eval-{case['id']}-{uuid.uuid4().hex[:8]}"
@@ -70,6 +73,7 @@ def run_case(agent: Agent, case: dict) -> dict:
         "response": final_response,
     }
 
+
 def main():
     agent = Agent()
     cases = load_cases()
@@ -84,6 +88,7 @@ def main():
         if not result["passed"]:
             for f in result["failures"]:
                 print(f"     - {f}")
+        time.sleep(5)
 
     print("\n" + "=" * 60)
     print("SUMMARY")
